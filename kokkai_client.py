@@ -16,7 +16,7 @@ DEFAULT_MAX_RECORDS = 30
 
 
 def _build_url(endpoint: str, params: Dict[str, Any]) -> str:
-    """\u691c\u7d22\u30d1\u30e9\u30e1\u30fc\u30bf\u304b\u3089URL\u3092\u69cb\u7bc9"""
+    """検索パラメータからURLを構築"""
     query = {}
     if params.get("query"):
         query["any"] = params["query"]
@@ -44,7 +44,7 @@ def _build_url(endpoint: str, params: Dict[str, Any]) -> str:
 
 
 def _fetch_json(url: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
-    """URL\u304b\u3089JSON\u3092\u53d6\u5f97\uff08\u30a8\u30e9\u30fc\u51e6\u7406\u4ed8\u304d\uff09"""
+    """URLからJSONを取得（エラー処理付き）"""
     req = urllib.request.Request(
         url,
         headers={
@@ -59,11 +59,11 @@ def _fetch_json(url: str, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
             return json.loads(data)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"API HTTP\u30a8\u30e9\u30fc {e.code}: {body[:300]}") from e
+        raise RuntimeError(f"API HTTPエラー {e.code}: {body[:300]}") from e
     except urllib.error.URLError as e:
-        raise RuntimeError(f"API\u63a5\u7d9a\u30a8\u30e9\u30fc: {e.reason}") from e
+        raise RuntimeError(f"API接続エラー: {e.reason}") from e
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"JSON\u30d1\u30fc\u30b9\u30a8\u30e9\u30fc: {e}") from e
+        raise RuntimeError(f"JSONパースエラー: {e}") from e
 
 
 def search_speeches(
@@ -74,13 +74,54 @@ def search_speeches(
     until_date: Optional[str] = None,
     limit: int = 10,
     start: int = 1,
+    or_search: bool = False,
 ) -> Dict[str, Any]:
     """
-    \u767a\u8a00\u691c\u7d22 (search_speeches \u76f8\u5f53)
-    \u8fd4\u308a\u5024: { total: int, items: list[SpeechItem], nextRecordPosition?: int }
+    発言検索 (search_speeches 相当)
+    or_search=True の場合、query のキーワードのいずれかを含む (OR検索)
+    返り値: { total: int, items: list[SpeechItem], nextRecordPosition?: int }
     """
     if not any([query, speaker, nameOfMeeting]):
-        raise ValueError("query, speaker, nameOfMeeting \u306e\u3044\u305a\u308c\u304b\u3092\u6307\u5b9a\u3057\u3066\u304f\u3060\u3055\u3044")
+        raise ValueError("query, speaker, nameOfMeeting のいずれかを指定してください")
+
+    if query and or_search:
+        keywords = [k.strip() for k in query.split() if k.strip()]
+        if not keywords:
+            keywords = [query]
+        items = []
+        seen = set()
+        sub_limit = min(max(limit // max(len(keywords), 1) + 5, 5), 50)
+        for kw in keywords:
+            sub_params = {
+                "query": kw,
+                "speaker": speaker,
+                "nameOfMeeting": nameOfMeeting,
+                "from": from_date,
+                "until": until_date,
+                "limit": sub_limit,
+                "startRecord": start,
+            }
+            url = _build_url("speech", sub_params)
+            data = _fetch_json(url)
+            for rec in data.get("speechRecord", []):
+                sid = rec.get("speechID")
+                if sid not in seen:
+                    seen.add(sid)
+                    items.append({
+                        "speechID": rec.get("speechID"),
+                        "issueID": rec.get("issueID"),
+                        "date": rec.get("date"),
+                        "nameOfMeeting": rec.get("nameOfMeeting"),
+                        "speaker": rec.get("speaker", ""),
+                        "speech": rec.get("speech", ""),
+                        "speechOrder": rec.get("speechOrder"),
+                        "speechURL": rec.get("speechURL"),
+                        "meetingURL": rec.get("meetingURL"),
+                    })
+        items = items[:limit]
+        total = len(items)  # approximate for OR
+        result = {"total": total, "items": items}
+        return result
 
     params = {
         "query": query,
@@ -119,18 +160,18 @@ def search_speeches(
 
 def get_meeting(issueID: str) -> Dict[str, Any]:
     """
-    \u4f1a\u8b70\u9332\u5168\u4f53\u3092\u53d6\u5f97 (get_meeting \u76f8\u5f53)
-    \u8fd4\u308a\u5024: { issueID, date, nameOfMeeting, speeches: list[SpeechItem] }
+    会議録全体を取得 (get_meeting 相当)
+    返り値: { issueID, date, nameOfMeeting, speeches: list[SpeechItem] }
     """
     if not issueID:
-        raise ValueError("issueID \u3092\u6307\u5b9a\u3057\u3066\u304f\u3060\u3055\u3044")
+        raise ValueError("issueID を指定してください")
 
     url = f"{KOKKAI_API_BASE}/meeting?issueID={urllib.parse.quote(issueID)}&recordPacking=json"
     data = _fetch_json(url)
 
     records = data.get("meetingRecord", [])
     if not records:
-        raise RuntimeError(f"\u4f1a\u8b70\u9332\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093: {issueID}")
+        raise RuntimeError(f"会議録が見つかりません: {issueID}")
 
     rec = records[0]
     speeches = []
@@ -156,16 +197,16 @@ def get_meeting(issueID: str) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    # \u7c21\u6613\u30c6\u30b9\u30c8
-    print("=== \u691c\u7d22\u30c6\u30b9\u30c8 (\u751f\u6210AI) ===")
-    res = search_speeches(query="\u751f\u6210AI", limit=2)
-    print(f"\u7dcf\u4ef6\u6570: {res['total']}")
+    # 簡易テスト
+    print("=== 検索テスト (生成AI) ===")
+    res = search_speeches(query="生成AI", limit=2)
+    print(f"総件数: {res['total']}")
     for i, item in enumerate(res["items"], 1):
         print(f"{i}. {item['date']} {item['speaker']}")
         print(f"   {item['speech'][:80]}...")
         print(f"   issueID={item['issueID']}")
-    print("\n=== \u4f1a\u8b70\u9332\u53d6\u5f97\u30c6\u30b9\u30c8 ===")
+    print("\n=== 会議録取得テスト ===")
     if res["items"]:
         meeting = get_meeting(res["items"][0]["issueID"])
-        print(f"\u4f1a\u8b70: {meeting['nameOfMeeting']} ({meeting['date']})")
-        print(f"\u767a\u8a00\u6570: {len(meeting['speeches'])}")
+        print(f"会議: {meeting['nameOfMeeting']} ({meeting['date']})")
+        print(f"発言数: {len(meeting['speeches'])}")

@@ -7,18 +7,27 @@ Kokkai 検索 CLI (kokkai-mcp 互換の検索)
 - MDファイル自動作成（現在のディレクトリ）
   ファイル名: YYYYMMDD-クエリ-発言者-from.md
 
+検索モード:
+  --query "kw1 kw2"          : AND検索 (すべて含む、デフォルト)
+  --or-query "kw1 kw2" -o    : OR検索 (いずれかを含む)
+
 追加オプション:
   --json            JSONのみ出力（MDは作成）
+  --html            HTMLレポートファイルを生成（バッチPDF変換用）
   --browser-pdf     ブラウザでPDF用レポートを開く（印刷でPDF保存）
 
 使い方例:
-  python cli.py --query "生成AI" --limit 5
+  python cli.py --query "生成AI 規制" --limit 5
+  python cli.py --or-query "生成AI 規制" -o
   python cli.py --speaker "岸田" --from 2024-01-01
-  python cli.py --meeting "予算委員会" --limit 3 --browser-pdf
+  python cli.py --meeting "予算委員会" --limit 3 --html
+  python cli.py --query "生成AI" --browser-pdf
 """
 import argparse
+import datetime
 import json
 import os
+import re
 import sys
 from kokkai_client import search_speeches, get_meeting
 
@@ -44,32 +53,59 @@ def print_speech(item: dict, idx: int = None):
 
 def main():
     parser = argparse.ArgumentParser(description="国会議事録検索 CLI (kokkai-mcp ベース)")
-    parser.add_argument("--query", "-q", help="本文検索キーワード (AND)")
+    parser.add_argument("--query", "-q", help="本文検索キーワード (AND検索)")
+    parser.add_argument("--or-query", "-o", dest="or_query", help="本文検索キーワード (OR検索: いずれかのキーワードを含む)")
     parser.add_argument("--speaker", "-s", help="発言者名 (部分一致)")
     parser.add_argument("--meeting", "-m", dest="nameOfMeeting", help="会議名 (部分一致)")
-    parser.add_argument("--from", dest="from_date", help="開始日 YYYY-MM-DD")
-    parser.add_argument("--until", dest="until_date", help="終了日 YYYY-MM-DD")
+    parser.add_argument("--from", dest="from_date", help="開始日 (YYYY-MM-DD または 1989年11月01日 のような形式)")
+    parser.add_argument("--until", dest="until_date", help="終了日 (YYYY-MM-DD または 1989年11月01日まで のような形式)")
     parser.add_argument("--limit", "-n", type=int, default=10, help="取得件数 (最大100)")
     parser.add_argument("--full", action="store_true", help="最初に見つかった会議録全体を表示")
     parser.add_argument("--json", action="store_true", help="JSON形式で出力")
+    parser.add_argument("--html", action="store_true", 
+                        help="HTMLレポートファイルを生成（バッチPDF変換用）")
     parser.add_argument("--browser-pdf", action="store_true", 
                         help="ブラウザでPDF用レポートを開く（印刷→PDF保存）")
 
     args = parser.parse_args()
 
-    if not any([args.query, args.speaker, args.nameOfMeeting]):
+    def normalize_date(d):
+        if not d:
+            return None
+        d = str(d).strip()
+        # Strip Japanese qualifiers like まで, から
+        d = re.sub(r'(まで|から|以降|以前|以後)', '', d).strip()
+        # Japanese format: 1989年11月01日
+        match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日?', d)
+        if match:
+            y, m, dd = match.groups()
+            return f"{int(y):04d}-{int(m):02d}-{int(dd):02d}"
+        # Validate standard format
+        try:
+            datetime.datetime.strptime(d, "%Y-%m-%d")
+            return d
+        except ValueError:
+            return d  # let it fail later if invalid
+
+    args.from_date = normalize_date(args.from_date)
+    args.until_date = normalize_date(args.until_date)
+
+    if not any([args.query, args.or_query, args.speaker, args.nameOfMeeting]):
         parser.print_help()
-        print("\nエラー: --query / --speaker / --meeting のいずれかを指定してください", file=sys.stderr)
+        print("\nエラー: --query / --or-query / --speaker / --meeting のいずれかを指定してください", file=sys.stderr)
         sys.exit(1)
 
     try:
+        effective_query = args.or_query if args.or_query else args.query
+        or_search = bool(args.or_query)
         result = search_speeches(
-            query=args.query,
+            query=effective_query,
             speaker=args.speaker,
             nameOfMeeting=args.nameOfMeeting,
             from_date=args.from_date,
             until_date=args.until_date,
             limit=args.limit,
+            or_search=or_search,
         )
     except Exception as e:
         print(f"検索エラー: {e}", file=sys.stderr)
@@ -77,7 +113,8 @@ def main():
 
     # 検索パラメータ（MD / PDF用）
     search_params = {
-        "query": args.query,
+        "query": effective_query,
+        "or": or_search,
         "speaker": args.speaker,
         "nameOfMeeting": args.nameOfMeeting,
         "from": args.from_date,
@@ -92,9 +129,22 @@ def main():
             search_params, 
             total=result.get("total")
         )
-        print(f"\n📝 MDファイルを作成しました: {md_path}")
+        print(f"\n\uD83D\uDCDD MDファイルを作成しました: {md_path}")
     except Exception as e:
         print(f"MDファイル作成失敗: {e}", file=sys.stderr)
+
+    # HTML生成（バッチ向け）
+    if args.html:
+        try:
+            html_path = kokkai_report.create_html_file(
+                result["items"], 
+                search_params, 
+                total=result.get("total")
+            )
+            print(f"\uD83D\uDCC4 HTMLファイルを作成しました: {html_path}")
+            print("   このファイルをブラウザや外部ツールでPDFに変換してください。")
+        except Exception as e:
+            print(f"HTMLファイル作成失敗: {e}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
