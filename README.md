@@ -6,11 +6,11 @@
 
 https://github.com/harutomo51/kokkai-mcp のコア機能を活用した検索システムです。
 
-kokkai-mcp が提供する `search_speeches` / `get_meeting` と同等の機能を、** ブラウザUI** と **CLI** で簡単に利用できます。
+kokkai-mcp が提供する `search_speeches` / `get_meeting` と同等の機能を、**ブラウザUI** と **CLI** で簡単に利用できます。
 
 ## 特徴
 
-- 国立国会図書館「国会議事録検索システムAPI」を直接使用
+- 国立国会図書館「国会会議録検索システムAPI」を直接使用
 - キーワード・発言者・会議名・期間で検索
 - 検索結果から会議録全文をワンクリックで表示
 - 依存なし（Python標準ライブラリのみ）
@@ -33,19 +33,27 @@ python server.py
 
 ### 2. CLI
 
-CLIは画面表示に加え、**標準でMarkdownファイルを作成** します。
+CLIは画面表示に加え、**標準でMarkdownファイルを作成**します。
 
 **ファイル名規則**（現在のディレクトリに作成）:
 `YYYYMMDD-クエリ-発言者-from.md`
 
 例: `20240630-生成AI-岸田-2024-01-01.md`
 
+**検索モード**:
+
+- `--query "kw1 kw2"` (または `-q`) : **AND検索**（すべてのキーワードを含む、デフォルト）
+- `--or-query "kw1 kw2"` (または `-o`) : **OR検索**（いずれかのキーワードを含む）
+
 ```bash
-# 基本検索（MDファイル自動作成）
-python cli.py --query "生成AI" --limit 5
+# AND検索（MDファイル自動作成）
+python cli.py --query "生成AI 規制" --limit 5
+
+# OR検索
+python cli.py --or-query "生成AI 規制" -o
 
 # 発言者 + 期間指定
-python cli.py -s "岸田" --from "2024-01-01" --limit 10
+python cli.py -s "岸田" --from 2024-01-01 --limit 10
 
 # ブラウザでPDFレポートを開く（印刷 → PDF保存）
 python cli.py --query "生成AI" --browser-pdf
@@ -53,6 +61,8 @@ python cli.py --query "生成AI" --browser-pdf
 
 **主なオプション**:
 
+- `--query` / `-q` : 本文検索キーワード (AND検索、デフォルト)
+- `--or-query` / `-o` : 本文検索キーワード (OR検索)
 - `--json` : JSON出力のみ（MD作成はスキップ）
 - `--html` : HTMLレポートファイルを生成（バッチ処理・PDF変換用）
 - `--browser-pdf` : ブラウザでPDF用レポートを開く（印刷ダイアログでPDF保存）
@@ -61,20 +71,33 @@ python cli.py --query "生成AI" --browser-pdf
 **複数クエリの一括処理例（テキストファイル + bash）**:
 
 ```bash
-# queries.txt の例（スペース区切り）
-#クエリ 発言者 from
-生成AI 岸田 2024-01-01
-デジタル 上野 1989年11月01日
+# queries.txt の例（1行1クエリ）
+# query speaker from
+生成AI 上野 2024-01-01
+デジタル 岸田 2023-01-01
 
-# 一括実行（MD + HTMLを自動生成）
+# 一括実行（MD + HTMLを自動生成）。OR検索も可能
 while read q s f; do
   python cli.py --query "$q" -s "$s" --from "$f" --html
+  # OR検索例: python cli.py --or-query "$q" -o -s "$s" --from "$f" --html
 done < queries.txt
 ```
 
-生成された .html ファイルを一括でPDFに変換したい場合は、外部ツール（wkhtmltopdfなどをと組み合わせることをおすすめします（Python標準ライブラリのみでは高品質PDFの直接生成は実用的には困难です）。
+生成された .html ファイルを一括でPDFに変換したい場合は、外部ツール（wkhtmltopdfなど）と組み合わせることをおすすめします（Python標準ライブラリのみでは高品質PDFの直接生成は実用的には困難です）。
 
-**バッチ処理（複数クエリの一括実行）**
+**Pythonモジュール (kokkai_report.py)**:
+
+```python
+import kokkai_report
+
+# MDファイル作成
+md_path = kokkai_report.create_md_file(items, params, total=...)
+
+# ブラウザでPDFレポートを開く
+kokkai_report.open_in_browser_for_pdf(items, params)
+```
+
+### バッチ処理（複数クエリの一括実行）
 
 テキストファイルに複数クエリを用意して一括処理するためのヘルパースクリプト `kokkai_batch.py` を用意しています。
 
@@ -83,7 +106,7 @@ done < queries.txt
 ```
 # コメントは # で始められます
 --query "生成AI" --speaker "岸田" --from "2024-01-01"
---query "デジタル" -s "上野" --from "1989年11月01日まで"
+--or-query "デジタル 規制" -o -s "上野" --from "1989年11月01日まで"
 --query "AI規制" --from "2023年" --until "2025年12月31日"
 ```
 
@@ -96,12 +119,15 @@ python kokkai_batch.py queries.txt
 **拡張オプション例**:
 
 ```bash
-# 並列2実行 + ログ出力 + スリープ調整
+# 並列2実行 + ログ出力 + スリープ調整 + リトライ + ドライラン
+# OR検索もサポート
 python kokkai_batch.py queries.txt \
   --workers 2 \
   --log-file batch.log \
   --sleep-min 1 \
-  --sleep-max 5
+  --sleep-max 5 \
+  --retry 2 \
+  --dry-run
 ```
 
 **主なオプション**:
@@ -113,12 +139,12 @@ python kokkai_batch.py queries.txt \
 - `--dry-run` : 実際に実行せず、予定のコマンドのみ表示。
 
 **追加機能**:
-- シンプルな進捕バー表示（% と バー）。
+- シンプルな進捗バー表示（% と バー）。
 - 実行終了時に成功/失敗件数サマリー。
 - 失敗時は指数バックオフでリトライ。
 
 - 各クエリごとに MD ファイルが自動生成されます。
-- API サーバ負荷を避けるため、**クエリごとにランダムスリープ** を入れています。
+- API サーバー負荷を避けるため、**クエリごとにランダムスリープ** を入れています。
 - `--from` / `--until` は通常の `YYYY-MM-DD` に加え、 **「1989年11月01日まで」** のような日本語表記もサポートしています。
 
 サンプルファイル `queries.txt` がリポジトリに含まれています。適宜編集してご利用ください。
@@ -166,7 +192,7 @@ kokkai_report.open_in_browser_for_pdf(result["items"], params)
 ## 技術メモ
 
 - 使用API: `https://kokkai.ndl.go.jp/api/speech` および `/meeting`
-- 利用規約: [国会議事録検索システム利用規約](https://kokkai.ndl.go.jp/terms.html) に従ってください
+- 利用規約: [国会会議録検索システム利用規約](https://kokkai.ndl.go.jp/terms.html) に従ってください
 - キャッシュ: 実装していません（必要なら追加可能）
 - サーバーはローカルプロキシとして動作するため、ブラウザからの直接CORS問題を回避
 
