@@ -2,16 +2,16 @@
 
 **Built with Grok** (xAI)
 
-国会議事録検索システム - ブラウザで簡単に検索·全文表示·PDF出力可能
+国会議事録検索システム - ブラウザで簡単に検索・全文表示・PDF出力可能
 
 https://github.com/harutomo51/kokkai-mcp のコア機能を活用した検索システムです。
 
-kokkai-mcp が提供する `search_speeches` / `get_meeting` と同等の機能を、**ブラウザUI** と **CLI** で簡単に利用できます。
+kokkai-mcp が提供する `search_speeches` / `get_meeting` と同等の機能を、** ブラウザUI** と **CLI** で簡単に利用できます。
 
 ## 特徴
 
-- 国立国会图書館「国会議事録検索システムAPI」を直接使用
-- キーワード·発言者·会議名·期間で検索
+- 国立国会図書館「国会議事録検索システムAPI」を直接使用
+- キーワード・発言者・会議名・期間で検索
 - 検索結果から会議録全文をワンクリックで表示
 - 依存なし（Python標準ライブラリのみ）
 - kokkai-mcp と同じ検索ロジック
@@ -33,7 +33,7 @@ python server.py
 
 ### 2. CLI
 
-CLIは画面表示に加え、**標準でMarkdownファイルを作成**します。
+CLIは画面表示に加え、**標準でMarkdownファイルを作成** します。
 
 **ファイル名規則**（現在のディレクトリに作成）:
 `YYYYMMDD-クエリ-発言者-from.md`
@@ -54,7 +54,7 @@ python cli.py --query "生成AI" --browser-pdf
 **主なオプション**:
 
 - `--json` : JSON出力のみ（MD作成はスキップ）
-- `--html` : HTMLレポートファイルを生成（バッチ処理·PDF変換用）
+- `--html` : HTMLレポートファイルを生成（バッチ処理・PDF変換用）
 - `--browser-pdf` : ブラウザでPDF用レポートを開く（印刷ダイアログでPDF保存）
 - `--full` : 最初にヒットした会議録の全文を表示
 
@@ -72,21 +72,9 @@ while read q s f; do
 done < queries.txt
 ```
 
-生成された .html ファイルを一括でPDFに変換したい場合は、外部ツール（wkhtmltopdfなど）と組み合わせることをおすすめします（Python標準ライブラリのみでは高品質PDFの直接生成は実用的には困難です）。
+生成された .html ファイルを一括でPDFに変換したい場合は、外部ツール（wkhtmltopdfなどをと組み合わせることをおすすめします（Python標準ライブラリのみでは高品質PDFの直接生成は実用的には困难です）。
 
-**Pythonモジュール (kokkai_report.py)**:
-
-```python
-import kokkai_report
-
-# MDファイル作成
-md_path = kokkai_report.create_md_file(items, params, total=...)
-
-# ブラウザでPDFレポートを開く
-kokkai_report.open_in_browser_for_pdf(items, params)
-```
-
-### バッチ処理（複数クエリの一括実行）
+**バッチ処理（複数クエリの一括実行）**
 
 テキストファイルに複数クエリを用意して一括処理するためのヘルパースクリプト `kokkai_batch.py` を用意しています。
 
@@ -121,9 +109,16 @@ python kokkai_batch.py queries.txt \
 - `--workers N` : 並列実行数（デフォルト: 1）。API負荷に注意して使用してください。
 - `--log-file FILE` : 実行ログをファイルに出力。
 - `--sleep-min` / `--sleep-max` : クエリ間のスリープ秒を調整（デフォルト 1〜5秒）。
+- `--retry N` : 失敗時のリトライ回数（デフォルト: 0）。
+- `--dry-run` : 実際に実行せず、予定のコマンドのみ表示。
+
+**追加機能**:
+- シンプルな進捕バー表示（% と バー）。
+- 実行終了時に成功/失敗件数サマリー。
+- 失敗時は指数バックオフでリトライ。
 
 - 各クエリごとに MD ファイルが自動生成されます。
-- API サーバー負荷を避けるため、**クエリごとにランダムスリープ** を入れています。
+- API サーバ負荷を避けるため、**クエリごとにランダムスリープ** を入れています。
 - `--from` / `--until` は通常の `YYYY-MM-DD` に加え、 **「1989年11月01日まで」** のような日本語表記もサポートしています。
 
 サンプルファイル `queries.txt` がリポジトリに含まれています。適宜編集してご利用ください。
@@ -157,7 +152,7 @@ kokkai_report.open_in_browser_for_pdf(result["items"], params)
 
 ## kokkai-mcp との関係
 
-このシステムは **kokkai-mcp の検索部分を再利用·ラップ** したものです。
+このシステムは **kokkai-mcp の検索部分を再利用・ラップ** したものです。
 
 | 機能               | kokkai-mcp          | 本システム             |
 |--------------------|---------------------|------------------------|
@@ -166,7 +161,7 @@ kokkai_report.open_in_browser_for_pdf(result["items"], params)
 | AI要約             | summarize_*         | ✗ (要Claude API)       |
 | 時系列/政党比較    | compare_* / analyze | ✗                      |
 
-**高度な要約·分析** をしたい場合は、kokkai-mcp を Claude Desktop や MCP対応クライアントで併用してください。
+**高度な要約・分析** をしたい場合は、kokkai-mcp を Claude Desktop や MCP対応クライアントで併用してください。
 
 ## 技術メモ
 
