@@ -1,15 +1,30 @@
 #!/usr/bin/env python3
 """
 Kokkai 検索 CLI (kokkai-mcp 互換の検索)
+
+標準動作:
+- 画面表示
+- MDファイル自動作成（現在のディレクトリ）
+  ファイル名: YYYYMMDD-クエリ-発言者-from.md
+
+追加オプション:
+  --json            JSONのみ出力（MDは作成）
+  --browser-pdf     ブラウザでPDF用レポートを開く（印刷でPDF保存）
+
 使い方例:
   python cli.py --query "生成AI" --limit 5
   python cli.py --speaker "岸田" --from 2024-01-01
-  python cli.py --meeting "予算委員会" --limit 3
+  python cli.py --meeting "予算委員会" --limit 3 --browser-pdf
 """
 import argparse
 import json
+import os
 import sys
 from kokkai_client import search_speeches, get_meeting
+
+# 同ディレクトリのモジュールを確実にインポート
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kokkai_report
 
 
 def print_speech(item: dict, idx: int = None):
@@ -37,6 +52,8 @@ def main():
     parser.add_argument("--limit", "-n", type=int, default=10, help="取得件数 (最大100)")
     parser.add_argument("--full", action="store_true", help="最初に見つかった会議録全体を表示")
     parser.add_argument("--json", action="store_true", help="JSON形式で出力")
+    parser.add_argument("--browser-pdf", action="store_true", 
+                        help="ブラウザでPDF用レポートを開く（印刷→PDF保存）")
 
     args = parser.parse_args()
 
@@ -57,6 +74,27 @@ def main():
     except Exception as e:
         print(f"検索エラー: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # 検索パラメータ（MD / PDF用）
+    search_params = {
+        "query": args.query,
+        "speaker": args.speaker,
+        "nameOfMeeting": args.nameOfMeeting,
+        "from": args.from_date,
+        "until": args.until_date,
+        "limit": args.limit,
+    }
+
+    # === 標準で MD ファイルを作成 ===
+    try:
+        md_path = kokkai_report.create_md_file(
+            result["items"], 
+            search_params, 
+            total=result.get("total")
+        )
+        print(f"\n📝 MDファイルを作成しました: {md_path}")
+    except Exception as e:
+        print(f"MDファイル作成失敗: {e}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -80,7 +118,18 @@ def main():
             if len(meeting["speeches"]) > 30:
                 print(f"... 他 {len(meeting['speeches']) - 30} 件 (省略)")
         except Exception as e:
-            print(f"会議録取得失攷: {e}", file=sys.stderr)
+            print(f"会議録取得失敗: {e}", file=sys.stderr)
+
+    # === おまけ: ブラウザでPDFレポートを開く ===
+    if args.browser_pdf:
+        try:
+            kokkai_report.open_in_browser_for_pdf(
+                result["items"], 
+                search_params, 
+                total=result.get("total")
+            )
+        except Exception as e:
+            print(f"ブラウザPDFオープン失敗: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

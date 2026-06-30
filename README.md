@@ -33,18 +33,40 @@ python server.py
 
 ### 2. CLI
 
+CLIは画面表示に加え、**標準でMarkdownファイルを作成**します。
+
+**ファイル名規則**（現在のディレクトリに作成）:
+`YYYYMMDD-クエリ-発言者-from.md`
+
+例: `20240630-生成AI-岸田-2024-01-01.md`
+
 ```bash
-# 基本検索
+# 基本検索（MDファイル自動作成）
 python cli.py --query "生成AI" --limit 5
 
-# 発言者指定
+# 発言者 + 期間指定
 python cli.py -s "岸田" --from 2024-01-01 --limit 10
 
-# 会議名で絞る + 全文取得
-python cli.py --meeting "予算委員会" --limit 3 --full
+# ブラウザでPDFレポートを開く（印刷 → PDF保存）
+python cli.py --query "生成AI" --browser-pdf
+```
 
-# JSON出力
-python cli.py -q "デジタル" --json
+**主なオプション**:
+
+- `--json` : JSON出力のみ（MD作成はスキップ）
+- `--browser-pdf` : ブラウザでPDF用レポートを開く（印刷ダイアログでPDF保存）
+- `--full` : 最初にヒットした会議録の全文を表示
+
+**Pythonモジュール (kokkai_report.py)**:
+
+```python
+import kokkai_report
+
+# MDファイル作成
+md_path = kokkai_report.create_md_file(items, params, total=...)
+
+# ブラウザでPDFレポートを開く
+kokkai_report.open_in_browser_for_pdf(items, params)
 ```
 
 ### 3. Python から使う（ライブラリ）
@@ -60,6 +82,18 @@ for item in result["items"]:
 # 会議録全文
 meeting = get_meeting("122114324X00520260610")
 print(len(meeting["speeches"]), "件の発言")
+```
+
+**レポート生成 (kokkai_report)**:
+
+```python
+import kokkai_report
+
+# MD作成
+kokkai_report.create_md_file(result["items"], params, total=result["total"])
+
+# ブラウザでPDFレポートを開く
+kokkai_report.open_in_browser_for_pdf(result["items"], params)
 ```
 
 ## kokkai-mcp との関係
