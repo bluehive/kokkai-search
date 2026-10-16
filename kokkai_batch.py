@@ -32,6 +32,32 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+MIN_QUERY_SLEEP = 3.0
+
+
+def enforce_sleep_bounds(sleep_min, sleep_max, logger=None):
+    """クエリ間スリープの下限を 3 秒にする。3 未満は警告して引き上げる。"""
+    sleep_min = float(sleep_min)
+    sleep_max = float(sleep_max)
+    if sleep_min < MIN_QUERY_SLEEP:
+        msg = (
+            f"警告: --sleep-min {sleep_min} は下限 {MIN_QUERY_SLEEP:.0f} 秒に引き上げます"
+        )
+        if logger is not None:
+            logger.warning(msg)
+        else:
+            print(msg, file=sys.stderr)
+        sleep_min = MIN_QUERY_SLEEP
+    if sleep_max < sleep_min:
+        sleep_max = sleep_min
+    return sleep_min, sleep_max
+
+
+def substitute_outdir(line, outdir):
+    """バッチ行の {outdir} を出力先ディレクトリに置き換える。"""
+    return line.replace("{outdir}", outdir)
+
+
 def run_query(line, sleep_min, sleep_max, retry, logger, dry_run=False, cli_script="cli.py"):
     """\u5358\u4e00\u30af\u30a8\u30ea\u3092\u5b9f\u884c\uff08\u30ea\u30c8\u30e9\u30a4\u5bfe\u5fdc\uff09"""
     if dry_run:
@@ -88,8 +114,10 @@ def main():
     parser.add_argument("--workers", type=int, default=1,
                         help="\u4e26\u5217\u5b9f\u884c\u6570 (\u30c7\u30d5\u30a9\u30eb\u30c8: 1 = \u9010\u6b21\u5b9f\u884c)")
     parser.add_argument("--log-file", help="\u30ed\u30b0\u51fa\u529b\u30d5\u30a1\u30a4\u30eb (\u7701\u7565\u6642\u306f\u30b3\u30f3\u30bd\u30fc\u30eb\u306e\u307f)")
-    parser.add_argument("--sleep-min", type=float, default=1.0,
-                        help="\u30af\u30a8\u30ea\u9593\u6700\u5c0f\u30b9\u30ea\u30fc\u30d7\u79d2 (\u30c7\u30d5\u30a9\u30eb\u30c8: 1)")
+    parser.add_argument("--outdir", default=".",
+                        help="出力先ディレクトリ。バッチ行の {outdir} をこの値に置換する")
+    parser.add_argument("--sleep-min", type=float, default=3.0,
+                        help="クエリ間の最小スリープ秒（デフォルト: 3）")
     parser.add_argument("--sleep-max", type=float, default=5.0,
                         help="\u30af\u30a8\u30ea\u9593\u6700\u5927\u30b9\u30ea\u30fc\u30d7\u79d2 (\u30c7\u30d5\u30a9\u30eb\u30c8: 5)")
     parser.add_argument("--retry", type=int, default=0,
@@ -98,6 +126,9 @@ def main():
                         help="\u5b9f\u969b\u306b\u5b9f\u884c\u305b\u305a\u3001\u4e88\u5b9a\u306e\u30b3\u30de\u30f3\u30c9\u306e\u307f\u8868\u793a")
 
     args = parser.parse_args()
+
+    outdir = args.outdir or "."
+    os.makedirs(outdir, exist_ok=True)
 
     query_file = Path(args.query_file)
     if not query_file.exists():
@@ -137,8 +168,16 @@ def main():
         logger.warning("No queries found in the file.")
         sys.exit(0)
 
+    sleep_min, sleep_max = enforce_sleep_bounds(args.sleep_min, args.sleep_max, logger)
+    args.sleep_min, args.sleep_max = sleep_min, sleep_max
+    lines = [substitute_outdir(line, outdir) for line in lines]
+    if args.workers > 1:
+        logger.warning(
+            "警告: --workers > 1 です。礼儀として workers=1（逐次・リクエスト間隔3秒以上）を推奨します"
+        )
+
     logger.info(f"Found {len(lines)} queries in {query_file}")
-    logger.info(f"Workers: {args.workers}, Sleep: {args.sleep_min}~{args.sleep_max}s, Retry: {args.retry}, Dry-run: {args.dry_run}")
+    logger.info(f"Workers: {args.workers}, Sleep: {args.sleep_min}~{args.sleep_max}s, Retry: {args.retry}, Dry-run: {args.dry_run}, Outdir: {outdir}")
 
     if args.dry_run:
         logger.info("=== DRY RUN MODE: No actual execution ===")
@@ -161,27 +200,46 @@ def main():
             bar = '#' * int(percent / 5) + '-' * (20 - int(percent / 5))
             print(f"\rProgress: [{bar}] {percent:.1f}% ({completed}/{total})", end="", flush=True)
 
-    # \u4e26\u5217\u5b9f\u884c
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = []
-        for line in lines:
-            future = executor.submit(run_query, line, args.sleep_min, args.sleep_max, args.retry, logger, args.dry_run, cli_script)
-            futures.append((future, line))
+    def run_one(line):
+        return run_query(
+            line, args.sleep_min, args.sleep_max, args.retry, logger, args.dry_run, cli_script
+        )
 
-        for future, line in futures:
+    # workers=1 は次のクエリを投げる前にスリープする（最後の後は待たない）。
+    # workers>1 は同時実行になるため、礼儀（間隔3秒・逐次）は保証できない。警告済み。
+    if args.workers <= 1:
+        for idx, line in enumerate(lines):
+            if idx > 0:
+                gap = random.uniform(args.sleep_min, args.sleep_max)
+                logger.info(f"Sleeping {gap:.1f}s before next query")
+                time.sleep(gap)
             try:
-                ok = future.result()
-                with lock:
-                    if ok:
-                        success_count += 1
-                    else:
-                        fail_count += 1
-                update_progress()
+                ok = run_one(line)
+                if ok:
+                    success_count += 1
+                else:
+                    fail_count += 1
             except Exception as e:
                 logger.error(f"Task failed: {e}")
-                with lock:
-                    fail_count += 1
-                update_progress()
+                fail_count += 1
+            update_progress()
+    else:
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = [executor.submit(run_one, line) for line in lines]
+            for future in futures:
+                try:
+                    ok = future.result()
+                    with lock:
+                        if ok:
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                    update_progress()
+                except Exception as e:
+                    logger.error(f"Task failed: {e}")
+                    with lock:
+                        fail_count += 1
+                    update_progress()
 
     print()  # newline after progress bar
     logger.info(f"Batch processing completed. Success: {success_count}, Failed: {fail_count}")

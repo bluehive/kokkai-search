@@ -1,0 +1,25 @@
+# ジャパニズム分析用の国会会議録バッチ
+# 各行は cli.py の引数。{outdir} は kokkai_batch.py --outdir で置換される。
+# --all は 100 件ずつページングし、リクエスト間隔は 3 秒以上。
+# JSONL はディレクトリ指定なので、ファイル名は 日付-クエリ-発言者-from.jsonl になる。
+# NDL API の any はスペース区切りで AND。OR は --or-query がキーワードごとに検索し speechID で重複除去する。
+# 推定リクエスト数 ≈ 20（1 リクエストあたり 100 件以下、間隔 3 秒以上）、所要 ≈ 2–3 分。
+# 件数は NDL API で確認した値（コメント）。実装時に API は叩かない。
+
+# 共産 243件（共産主義155・共産党22 を含む上位集合）
+--query "共産" --speaker "岸信介" --all --jsonl {outdir}/ --outdir {outdir}
+
+# 共産 266件（共産主義34・共産党177）
+--query "共産" --speaker "中曽根康弘" --all --jsonl {outdir}/ --outdir {outdir}
+
+# 安保 338件（AND「安保 改定」だと89件）
+--query "安保" --speaker "岸信介" --from 1960-01-01 --until 1960-07-31 --all --jsonl {outdir}/ --outdir {outdir}
+
+# 全学連2・集団的暴力5・法秩序6（OR、speechID 重複除去）
+--or-query "全学連 集団的暴力 法秩序" --speaker "岸信介" --from 1960-05-01 --until 1960-07-31 --all --jsonl {outdir}/ --outdir {outdir}
+
+# 三島6・市ヶ谷 若干（「佐藤」だと他の佐藤議員が混ざり三島12件）
+--or-query "三島 市ヶ谷" --speaker "佐藤栄作" --from 1970-11-25 --until 1970-12-31 --all --jsonl {outdir}/ --outdir {outdir}
+
+# 平和安全法制140・集団的自衛権230（OR）
+--or-query "平和安全法制 集団的自衛権" --speaker "安倍晋三" --from 2015-05-01 --until 2015-10-01 --all --jsonl {outdir}/ --outdir {outdir}
