@@ -1,0 +1,54 @@
+# kokkai-search の開発・取得タスク
+# 使い方: mise run test / mise run fetch:japanism:dry / mise run fetch:japanism
+# KOKKAI_OUT が既に設定されていればそれを使い、無ければ default を使う。
+
+[tools]
+python = "3.12"
+
+[env]
+# 既に KOKKAI_OUT があればそれを使い、無ければ既定のキャッシュディレクトリにする。
+# mise 2025.10 は env の default 記法を受け付けないため、テンプレートで分岐する。
+KOKKAI_OUT = "{{ get_env(name='KOKKAI_OUT', default=env.HOME ~ '/my-project/mypublish-japanism/notes/japanism-tasogare/kokkai-analysis/cache') }}"
+
+[tasks.test]
+description = "オフラインの単体テスト（ネットワーク不要）"
+run = "python -m unittest discover -s tests -v"
+
+[tasks."fetch:japanism"]
+description = "japanism_queries.txt を全件取得し KOKKAI_OUT に JSONL を書く（API を叩く）"
+run = '''
+mkdir -p "$KOKKAI_OUT"
+python kokkai_batch.py japanism_queries.txt \
+  --workers 1 \
+  --sleep-min 3 \
+  --sleep-max 5 \
+  --retry 2 \
+  --outdir "$KOKKAI_OUT" \
+  --log-file "$KOKKAI_OUT/fetch-japanism.log"
+'''
+
+[tasks."fetch:japanism:dry"]
+description = "japanism バッチのドライラン（API は叩かない）"
+run = '''
+mkdir -p "$KOKKAI_OUT"
+python kokkai_batch.py japanism_queries.txt \
+  --workers 1 \
+  --sleep-min 3 \
+  --sleep-max 5 \
+  --retry 2 \
+  --outdir "$KOKKAI_OUT" \
+  --log-file "$KOKKAI_OUT/fetch-japanism.log" \
+  --dry-run
+'''
+
+[tasks.smoke]
+description = "全学連×岸信介 1960 を取得する疎通確認（想定 5 件・1 リクエスト。API を叩く。通常は実行しない）"
+run = '''
+python cli.py --query "全学連" --speaker "岸信介" --from 1960-01-01 --until 1960-12-31 --all --jsonl out-smoke/ --outdir out-smoke
+'''
+
+[tasks."smoke:paging"]
+description = "共産×岸信介を 150 件で打ち切り、2 ページになることを確認する（想定 2 リクエスト・truncated・total_hits 243。API を叩く。通常は実行しない）"
+run = '''
+python cli.py --query "共産" --speaker "岸信介" --all --max-total 150 --jsonl out-smoke/ --outdir out-smoke
+'''

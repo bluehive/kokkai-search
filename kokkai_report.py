@@ -44,10 +44,45 @@ def generate_markdown(
     lines.append(f"- 発言者: {params.get('speaker') or '（指定なし）'}")
     lines.append(f"- 会議名: {params.get('nameOfMeeting') or '（指定なし）'}")
     lines.append(f"- 期間: {params.get('from', '') or ''} 〜 {params.get('until', '') or ''}")
-    lines.append(f"- 取得上限: {params.get('limit', 10)} 件")
+    if params.get("fetch_all"):
+        cap = params.get("max_total")
+        if cap:
+            lines.append(f"- 取得上限: 全件 (--all, 上限 {cap})")
+        else:
+            lines.append("- 取得上限: 全件 (--all)")
+    else:
+        lines.append(f"- 取得上限: {params.get('limit', 10)} 件")
     lines.append(f"- 出力日時: {now}")
-    if total is not None:
+    or_search = bool(params.get("or"))
+    total_is_exact = params.get("total_is_exact")
+    if total_is_exact is None:
+        total_is_exact = not or_search
+    upper = params.get("total_upper_bound")
+    if or_search and not total_is_exact:
+        if upper is None:
+            lines.append("- 総ヒット数: 不明（キーワード別合計の上限は未取得）")
+        else:
+            lines.append(f"- 総ヒット数: 不明（キーワード別合計の上限 {upper}）")
+    elif total is not None:
         lines.append(f"- 総ヒット数: {total}")
+    fetched = params.get("fetched")
+    if fetched is None:
+        fetched = len(items)
+    lines.append(f"- 取得件数: {fetched}")
+    truncated = params.get("truncated")
+    if truncated is None and total is not None and total_is_exact:
+        truncated = fetched < int(total)
+    if truncated:
+        if or_search and not total_is_exact:
+            cap = params.get("max_total")
+            if cap:
+                lines.append(
+                    f"- ⚠ 取得上限 {cap} 件に達したため全件を網羅していません（切り詰め）"
+                )
+            else:
+                lines.append("- ⚠ 全件を網羅していません（切り詰め）")
+        else:
+            lines.append("- ⚠ 取得件数が総ヒット数より少ない（切り詰め）")
     lines.append("")
     lines.append("## 発言一覧")
     lines.append("")
@@ -162,22 +197,32 @@ def generate_html_report(
     return html_doc
 
 
+def build_output_basename(params: Dict[str, Any], ext: str = ".md") -> str:
+    """MD / JSONL で共通のファイル名（拡張子だけ差し替える）。"""
+    date_str = datetime.date.today().strftime("%Y%m%d")
+    q = _sanitize_for_filename(params.get("query", ""))
+    s = _sanitize_for_filename(params.get("speaker", ""))
+    f = _sanitize_for_filename(params.get("from", "") or "")
+    filename = f"{date_str}-{q}-{s}-{f}{ext}"
+    filename = filename.replace("--", "-").strip("-")
+    return filename
+
+
 def create_md_file(
     items: List[Dict[str, Any]], 
     params: Dict[str, Any], 
     total: int = None,
-    filename: str = None
+    filename: str = None,
+    outdir: str = None,
 ) -> str:
-    """\u73fe在の作業ディレクトリに MD ファイルを作成してパスを返す"""
+    """作業ディレクトリ（または outdir）に MD ファイルを作成してパスを返す"""
     if filename is None:
-        date_str = datetime.date.today().strftime("%Y%m%d")
-        q = _sanitize_for_filename(params.get("query", ""))
-        s = _sanitize_for_filename(params.get("speaker", ""))
-        f = _sanitize_for_filename(params.get("from", "") or "")
-        filename = f"{date_str}-{q}-{s}-{f}.md".replace("--", "-").strip("-")
+        filename = build_output_basename(params, ".md")
 
     md_content = generate_markdown(items, params, total)
-    path = os.path.join(os.getcwd(), filename)
+    base = outdir if outdir else os.getcwd()
+    os.makedirs(base, exist_ok=True)
+    path = os.path.join(base, filename)
 
     with open(path, "w", encoding="utf-8") as fp:
         fp.write(md_content)

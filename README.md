@@ -63,7 +63,12 @@ python cli.py --query "生成AI" --browser-pdf
 
 - `--query` / `-q` : 本文検索キーワード (AND検索、デフォルト)
 - `--or-query` / `-o` : 本文検索キーワード (OR検索)
-- `--json` : JSON出力のみ（MD作成はスキップ）
+- `--all` : 全件取得（100件ずつページング。リクエスト間隔は3秒以上）
+- `--max-total N` : `--all` の取得上限
+- `--page-sleep SEC` : ページ間スリープ（下限 3 秒）
+- `--jsonl PATH` : JSONL 出力。ディレクトリならファイル名を自動生成し、`.meta.json` も書く
+- `--outdir DIR` : MD の出力先（省略時はカレントディレクトリ）
+- `--json` : 結果を JSON でも標準出力する（MD は作成する）
 - `--html` : HTMLレポートファイルを生成（バッチ処理・PDF変換用）
 - `--browser-pdf` : ブラウザでPDF用レポートを開く（印刷ダイアログでPDF保存）
 - `--full` : 最初にヒットした会議録の全文を表示
@@ -97,6 +102,60 @@ md_path = kokkai_report.create_md_file(items, params, total=...)
 kokkai_report.open_in_browser_for_pdf(items, params)
 ```
 
+## 全件取得（ページング）と JSONL 出力
+
+`--limit` の既定は 10 件です。API の `maximumRecords` は最大 100 なので、ヒットがそれより多いときは `--all` でページをたどります。ページの位置は `startRecord` と応答の `nextRecordPosition` で進め、`nextRecordPosition` が無い、0 件のページが返る、または `--max-total` に達したところで止まります。
+
+```bash
+# 全件（100件ずつ）。MD は --outdir、JSONL はディレクトリ指定で自動命名
+python cli.py --or-query "全学連 集団的暴力 法秩序" \
+  --speaker "岸信介" --from 1960-05-01 --until 1960-07-31 \
+  --all --jsonl out/ --outdir out
+
+# 多くても 50 件で打ち切る（NDL の any はスペース区切りが AND なので、広い語で取る）
+python cli.py --query "安保" --speaker "岸信介" --all --max-total 50 --jsonl out/
+```
+
+- `--all` : 100 件ずつ全ページを取得する。指定しないときの挙動（既定 `--limit 10`、MD を作る）は変わりません。
+- `--max-total N` : `--all` の取得件数の上限。超えた分は取りません。
+- `--page-sleep SEC` : リクエストのあいだに待つ秒数。既定 3。3 未満は警告して 3 秒に引き上げます。最初のリクエストの前には待ちません。
+- `--jsonl PATH` : 1 行 1 JSON（UTF-8、日本語はそのまま）で書きます。PATH がディレクトリ、または末尾が `/` のときは、MD と同じ規則のファイル名（拡張子 `.jsonl`）をその中に作ります。各行には `speechID` などの発言フィールドに加え、`query` / `or` / `speaker_filter` / `from` / `until` を付けます。
+- `--outdir DIR` : MD の出力先。省略すると今までどおりカレントディレクトリです。
+
+JSONL と対になる `<名前>.meta.json` に、検索条件、`total_hits`（総ヒット数）、`total_hits_upper_bound`、`total_is_exact`、`fetched`（取得件数）、`truncated`、リクエスト回数、`page_size`、`page_sleep`、`fetched_at`、`api_base` を書きます。OR 検索ではキーワードごとの `numberOfRecords` を `per_keyword_totals` に残します。
+
+NDL API の `any` はスペース区切りで AND 検索になります。OR は本ツールの `--or-query` がキーワードごとに検索し、`speechID` で重複除去します。キーワード間で同じ発言が重複しうるため、全ページを取り切ったときの OR の総ヒット数はユニーク件数です（`total_is_exact` が真）。途中で打ち切ったときはユニーク総数が分からないので、`total_hits` は取得件数のまま、`total_is_exact` は偽、`total_hits_upper_bound` はキーワード別合計（重複を含む上限）です。非 OR では API の `numberOfRecords` が総ヒット数なので、打ち切っても `total_is_exact` は真です。
+
+全ページを取り切れていないときは `truncated` が真になり、MD の見出しにも次の行が出ます。
+
+- `- 総ヒット数: N`（非 OR、または OR で全ページを取り切ったとき）
+- `- 総ヒット数: 不明（キーワード別合計の上限 N）`（OR で打ち切ったとき。ユニーク総数は出さない）
+- `- 取得件数: M`
+- `- ⚠ 取得件数が総ヒット数より少ない（切り詰め）`（総ヒット数が分かっていて切り詰めたときだけ）
+
+`--all` のときの「取得上限」は `全件 (--all)`、`--max-total` があるときはその上限です。
+
+国会会議録 API への依頼は、どの依頼のあいだも 3 秒以上空け、同時実行は 1 本（`workers=1`）にしてください。`kokkai_batch.py` はクエリのあいだに `--sleep-min`〜`--sleep-max` 秒（既定 3〜5、下限 3）待ちます。最後のクエリの後は待ちません。`--workers` が 1 より大きいときは警告します。バッチ行の `{outdir}` は `--outdir` の値に置き換わり、出力先ディレクトリは無ければ作ります。
+
+ジャパニズム分析用のクエリは `japanism_queries.txt` にあります。NDL の `any` はスペース区切りが AND なので、狭い AND（例: 「安保 改定」は 89 件）ではなく、確認済みの広い語と `--or-query` を使います。推定リクエスト数は約 20（1 リクエスト 100 件以下、間隔 3 秒以上）で、所要は約 2〜3 分です。件数は NDL API で確認した値です。
+
+| 行 | 検索 | 確認件数 |
+| --- | --- | --- |
+| 岸信介 × `共産` | AND（単一語） | 243（共産主義 155・共産党 22 を含む上位集合） |
+| 中曽根康弘 × `共産` | AND（単一語） | 266（共産主義 34・共産党 177） |
+| 岸信介 × `安保`（1960-01-01〜07-31） | AND（単一語） | 338（「安保 改定」の AND だと 89） |
+| 岸信介 × `全学連 集団的暴力 法秩序`（1960-05-01〜07-31） | OR（speechID で重複除去） | 全学連 2・集団的暴力 5・法秩序 6 |
+| 佐藤栄作 × `三島 市ヶ谷`（1970-11-25〜12-31） | OR | 三島 6・市ヶ谷 若干（「佐藤」だと他の佐藤議員が混ざり三島 12） |
+| 安倍晋三 × `平和安全法制 集団的自衛権`（2015-05-01〜10-01） | OR | 平和安全法制 140・集団的自衛権 230 |
+
+```bash
+mise run test                  # オフラインの単体テスト
+mise run fetch:japanism:dry    # API を叩かず、置換後のコマンドだけ表示
+mise run fetch:japanism        # 実取得。出力先は KOKKAI_OUT
+```
+
+`KOKKAI_OUT` が未設定なら `~/my-project/mypublish-japanism/notes/japanism-tasogare/kokkai-analysis/cache` を使います。実行前に別のディレクトリを渡すとそちらが優先されます。`mise run smoke` は全学連×岸信介（1960-01-01〜12-31）の疎通確認で、想定は 5 件・1 リクエストです。`mise run smoke:paging` は共産×岸信介を `--max-total 150` で打ち切り、2 ページ（150 件取得、`truncated`、`total_hits` 243）になることの確認です。どちらも API を叩くので、通常は実行しません。
+
 ### バッチ処理（複数クエリの一括実行）
 
 テキストファイルに複数クエリを用意して一括処理するためのヘルパースクリプト `kokkai_batch.py` を用意しています。
@@ -119,22 +178,24 @@ python kokkai_batch.py queries.txt
 **拡張オプション例**:
 
 ```bash
-# 並列2実行 + ログ出力 + スリープ調整 + リトライ + ドライラン
-# OR検索もサポート
+# 逐次実行 + ログ出力 + スリープ調整 + リトライ + ドライラン
+# OR検索もサポート。workers は 1 を推奨
 python kokkai_batch.py queries.txt \
-  --workers 2 \
+  --workers 1 \
   --log-file batch.log \
-  --sleep-min 1 \
+  --sleep-min 3 \
   --sleep-max 5 \
   --retry 2 \
+  --outdir out \
   --dry-run
 ```
 
 **主なオプション**:
 
-- `--workers N` : 並列実行数（デフォルト: 1）。API負荷に注意して使用してください。
+- `--workers N` : 並列実行数（デフォルト: 1）。1 より大きいと警告します。礼儀として 1 を推奨します。
 - `--log-file FILE` : 実行ログをファイルに出力。
-- `--sleep-min` / `--sleep-max` : クエリ間のスリープ秒を調整（デフォルト 1〜5秒）。
+- `--sleep-min` / `--sleep-max` : クエリ間のスリープ秒（デフォルト 3〜5秒）。3 未満は 3 秒に引き上げます。最後のクエリの後は待ちません。
+- `--outdir DIR` : 出力先。バッチ行の `{outdir}` をこのパスに置換し、ディレクトリが無ければ作ります。
 - `--retry N` : 失敗時のリトライ回数（デフォルト: 0）。
 - `--dry-run` : 実際に実行せず、予定のコマンドのみ表示。
 
