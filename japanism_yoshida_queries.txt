@@ -1,0 +1,21 @@
+# ジャパニズム分析用の国会会議録バッチ（岸 vs 吉田データパック）
+# mypublish-japanism issue #1 向け。岸側は japanism_queries.txt、こちらは吉田茂。
+# 各行は cli.py の引数。{outdir} は kokkai_batch.py --outdir で置換される。
+# --all は 100 件ずつページングし、リクエスト間隔は 3 秒以上。
+# JSONL はディレクトリ指定なので、ファイル名は 日付-クエリ-発言者-from.jsonl になる。
+# NDL API の any はスペース区切りで AND。OR は --or-query がキーワードごとに検索し speechID で重複除去する。
+# 発言者「吉田茂」は必ず日付で区切る。同名の吉田茂が 2005 年に現れるため、日付なしだと混ざる。
+# 推定リクエスト数 ≈ 11（1 リクエストあたり 100 件以下、間隔 3 秒以上）、所要 ≈ 1–1.5 分。
+# 件数は NDL API で確認した値（コメント）。実装時に API は叩かない。
+
+# Y1 共産 221件（1947-05-20〜1954-12-10、首相期）
+--query "共産" --speaker "吉田茂" --from 1947-05-20 --until 1954-12-10 --all --jsonl {outdir}/ --outdir {outdir}
+
+# Y2 旧安保期 安全保障条約105・安保8（OR、speechID 重複除去）
+--or-query "安保 安全保障条約" --speaker "吉田茂" --from 1951-09-01 --until 1952-04-28 --all --jsonl {outdir}/ --outdir {outdir}
+
+# Y3 再軍備 255件（岸信介は全期間5件）
+--query "再軍備" --speaker "吉田茂" --from 1947-05-20 --until 1954-12-10 --all --jsonl {outdir}/ --outdir {outdir}
+
+# Y4 自由主義32・経済復興23（OR）
+--or-query "自由主義 経済復興" --speaker "吉田茂" --from 1947-05-20 --until 1954-12-10 --all --jsonl {outdir}/ --outdir {outdir}
