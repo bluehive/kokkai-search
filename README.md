@@ -148,10 +148,21 @@ NDL API の `any` はスペース区切りで AND 検索になります。OR は
 | 佐藤栄作 × `三島 市ヶ谷`（1970-11-25〜12-31） | OR | 三島 6・市ヶ谷 若干（「佐藤」だと他の佐藤議員が混ざり三島 12） |
 | 安倍晋三 × `平和安全法制 集団的自衛権`（2015-05-01〜10-01） | OR | 平和安全法制 140・集団的自衛権 230 |
 
+岸信介との対比用に、吉田茂の首相期（1947-05-20〜1954-12-10、旧安保期だけ 1951-09-01〜1952-04-28）を `japanism_yoshida_queries.txt` に分けています。発言者「吉田茂」は同名が 2005 年に現れるため、どの行も `--from` と `--until` で日付を区切ります。推定リクエスト数は約 11（間隔 3 秒以上）で、所要は約 1〜1.5 分です。
+
+| 行 | 検索 | 確認件数 |
+| --- | --- | --- |
+| Y1 吉田茂 × `共産`（1947-05-20〜1954-12-10） | AND（単一語） | 221 |
+| Y2 吉田茂 × `安保 安全保障条約`（1951-09-01〜1952-04-28） | OR（speechID で重複除去） | 安全保障条約 105・安保 8 |
+| Y3 吉田茂 × `再軍備`（1947-05-20〜1954-12-10） | AND（単一語） | 255（岸信介は全期間 5） |
+| Y4 吉田茂 × `自由主義 経済復興`（1947-05-20〜1954-12-10） | OR | 自由主義 32・経済復興 23 |
+
 ```bash
-mise run test                  # オフラインの単体テスト
-mise run fetch:japanism:dry    # API を叩かず、置換後のコマンドだけ表示
-mise run fetch:japanism        # 実取得。出力先は KOKKAI_OUT
+mise run test                       # オフラインの単体テスト
+mise run fetch:japanism:dry         # API を叩かず、置換後のコマンドだけ表示
+mise run fetch:japanism             # 実取得。出力先は KOKKAI_OUT
+mise run fetch:japanism:yoshida:dry # 吉田茂バッチのドライラン（API は叩かない。推定 ≈ 11 リクエスト）
+mise run fetch:japanism:yoshida     # 吉田茂を実取得（API を叩く。推定 ≈ 11 リクエスト、所要 ≈ 1–1.5 分）
 ```
 
 `KOKKAI_OUT` が未設定なら `~/my-project/mypublish-japanism/notes/japanism-tasogare/kokkai-analysis/cache` を使います。実行前に別のディレクトリを渡すとそちらが優先されます。`mise run smoke` は全学連×岸信介（1960-01-01〜12-31）の疎通確認で、想定は 5 件・1 リクエストです。`mise run smoke:paging` は共産×岸信介を `--max-total 150` で打ち切り、2 ページ（150 件取得、`truncated`、`total_hits` 243）になることの確認です。どちらも API を叩くので、通常は実行しません。

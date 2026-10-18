@@ -1,5 +1,6 @@
 # kokkai-search の開発・取得タスク
 # 使い方: mise run test / mise run fetch:japanism:dry / mise run fetch:japanism
+#         mise run fetch:japanism:yoshida:dry / mise run fetch:japanism:yoshida
 # KOKKAI_OUT が既に設定されていればそれを使い、無ければ default を使う。
 
 [tools]
@@ -38,6 +39,33 @@ python kokkai_batch.py japanism_queries.txt \
   --retry 2 \
   --outdir "$KOKKAI_OUT" \
   --log-file "$KOKKAI_OUT/fetch-japanism.log" \
+  --dry-run
+'''
+
+[tasks."fetch:japanism:yoshida"]
+description = "japanism_yoshida_queries.txt を全件取得し KOKKAI_OUT に JSONL を書く（API を叩く。推定リクエスト数 ≈ 11、所要 ≈ 1–1.5 分）"
+run = '''
+mkdir -p "$KOKKAI_OUT"
+python kokkai_batch.py japanism_yoshida_queries.txt \
+  --workers 1 \
+  --sleep-min 3 \
+  --sleep-max 5 \
+  --retry 2 \
+  --outdir "$KOKKAI_OUT" \
+  --log-file "$KOKKAI_OUT/fetch-japanism-yoshida.log"
+'''
+
+[tasks."fetch:japanism:yoshida:dry"]
+description = "吉田茂バッチのドライラン（API は叩かない。推定リクエスト数 ≈ 11）"
+run = '''
+mkdir -p "$KOKKAI_OUT"
+python kokkai_batch.py japanism_yoshida_queries.txt \
+  --workers 1 \
+  --sleep-min 3 \
+  --sleep-max 5 \
+  --retry 2 \
+  --outdir "$KOKKAI_OUT" \
+  --log-file "$KOKKAI_OUT/fetch-japanism-yoshida.log" \
   --dry-run
 '''
 

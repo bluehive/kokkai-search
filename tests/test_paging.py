@@ -440,6 +440,57 @@ class BatchHelperTests(unittest.TestCase):
         self.assertTrue(any("安倍晋三" in ln for ln in lines))
         self.assertFalse(any("安保 改定" in ln or '安保 改定' in ln for ln in lines))
 
+    def _output_name_tails(self, path):
+        import shlex
+        text = path.read_text(encoding="utf-8")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+        names = []
+        for line in lines:
+            argv = shlex.split(line)
+            params = {"query": "", "speaker": "", "from": ""}
+            i = 0
+            while i < len(argv):
+                flag = argv[i]
+                if flag in ("--query", "--or-query", "--speaker", "--from") and i + 1 < len(argv):
+                    key = "query" if flag in ("--query", "--or-query") else flag.lstrip("-")
+                    params[key] = argv[i + 1]
+                    i += 2
+                    continue
+                i += 1
+            # 出力名は日付-クエリ-発言者-from。日付は今日で共通なので、残りで一意なら衝突しない。
+            base = kokkai_report.build_output_basename(params, ".jsonl")
+            names.append(base.split("-", 1)[1])
+        return lines, names
+
+    def test_japanism_yoshida_queries(self):
+        lines, names = self._output_name_tails(ROOT / "japanism_yoshida_queries.txt")
+        self.assertEqual(len(lines), 4)
+        for line in lines:
+            self.assertIn("--all", line)
+            self.assertIn("--jsonl {outdir}/", line)
+            self.assertIn("--outdir {outdir}", line)
+            self.assertIn('--speaker "吉田茂"', line)
+            self.assertIn("--from", line)
+            self.assertIn("--until", line)
+        self.assertEqual(len(names), len(set(names)), names)
+        _, kishi_names = self._output_name_tails(ROOT / "japanism_queries.txt")
+        overlap = set(names) & set(kishi_names)
+        self.assertEqual(overlap, set(), overlap)
+
+    def test_mise_yoshida_tasks(self):
+        text = (ROOT / "mise.toml").read_text(encoding="utf-8")
+        self.assertIn("[tasks.\"fetch:japanism:yoshida\"]", text)
+        self.assertIn("[tasks.\"fetch:japanism:yoshida:dry\"]", text)
+        # 吉田タスクは専用クエリファイルを、workers 1・sleep-min 3 で呼ぶ。
+        yoshida = text.split("[tasks.\"fetch:japanism:yoshida\"]", 1)[1]
+        self.assertIn("japanism_yoshida_queries.txt", yoshida)
+        self.assertIn("--workers 1", yoshida)
+        self.assertIn("--sleep-min 3", yoshida)
+        dry = text.split("[tasks.\"fetch:japanism:yoshida:dry\"]", 1)[1]
+        self.assertIn("japanism_yoshida_queries.txt", dry)
+        self.assertIn("--workers 1", dry)
+        self.assertIn("--sleep-min 3", dry)
+
 
 if __name__ == "__main__":
     unittest.main()
